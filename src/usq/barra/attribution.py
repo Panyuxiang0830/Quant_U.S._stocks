@@ -8,7 +8,7 @@ def cross_section(styles, industry, cap, returns, estu, min_obs=30):
     """Joint constrained WLS: Market + full industries + style exposures.
 
     Industry cap-weighted returns sum to zero. Objective weights=sqrt(cap), so
-    OLS rows are multiplied by cap**.25, matching inspected gpushare convention.
+    OLS rows are multiplied by cap**.25 to implement those objective weights.
     """
     complete = styles.notna().all(axis=1) & industry.notna() & cap.gt(0)
     fit = complete & returns.notna() & np.isfinite(returns) & estu.eq(1)

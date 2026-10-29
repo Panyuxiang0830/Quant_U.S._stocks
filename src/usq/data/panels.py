@@ -1,4 +1,4 @@
-"""gpushare-compatible trusted pickle wide panels: date strings x security IDs."""
+"""Trusted pickle wide panels: date strings x security IDs."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,7 +49,7 @@ class PanelStore:
         return self.root / f"{name}.pkl"
 
     def load(self, name, reference=None, numeric=True):
-        # Pickle is used for gpushare compatibility: only load trusted team artifacts.
+        # Only load trusted team artifacts when using pickle.
         return validate_panel(pd.read_pickle(self.path(name)), reference, numeric)
 
     def save(self, name, frame, numeric=True):

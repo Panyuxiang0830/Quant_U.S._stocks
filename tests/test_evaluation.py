@@ -12,6 +12,8 @@ def test_perfect_rankic_and_fixed_direction():
     s, _ = evaluate_simple(x, -x, x.notna(), direction=-1)
     assert s["rankic_mean"] == pytest.approx(1)
     assert "rankic_cv" not in s
+    assert {"icir", "rankicir", "cv_mean"}.issubset(s)
+    assert not any("annual" in key or "hac" in key for key in s)
     assert "cv" in daily
 
 

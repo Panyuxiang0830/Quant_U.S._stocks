@@ -70,7 +70,7 @@ def prepare(store: PanelStore, horizon=10, standardize=True, mode="vwap_compound
     if mode == "vwap_compound":
         raw, end = forward_returns(adjusted, horizon)
     elif mode == "close_sum":
-        # Optional legacy gpushare target convention: sum future daily returns.
+        # Alternative target convention: sum future daily close returns.
         # Still require all future marks; never reproduce pandas sum(skipna=True).
         cp = close * adj
         daily = cp / cp.shift(1) - 1

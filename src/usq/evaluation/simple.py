@@ -4,19 +4,6 @@ import pandas as pd
 from .direction_cv import direction_cv
 
 
-def hac_tstat(values, lags=10):
-    """Newey-West intercept t-statistic. Descriptive; not multiple-test corrected."""
-    x = pd.Series(values).dropna().to_numpy(float)
-    n = len(x)
-    if n < 3:
-        return np.nan
-    e = x - x.mean()
-    lrvar = np.dot(e, e) / n
-    for lag in range(1, min(lags, n - 1) + 1):
-        lrvar += 2 * (1 - lag / (lags + 1)) * np.dot(e[lag:], e[:-lag]) / n
-    return float(x.mean() / np.sqrt(lrvar / n)) if lrvar > 0 else np.nan
-
-
 def evaluate_simple(factor, label, universe, min_stocks=30, direction=None, horizon=10, rankic_history=None):
     """Layer 1. direction=None learns a sign ONLY on a caller-supplied IS slice.
 
@@ -45,9 +32,7 @@ def evaluate_simple(factor, label, universe, min_stocks=30, direction=None, hori
         summary[f"{key}_mean"] = float(mu)
         summary[f"{key}_std"] = float(sd)
         summary[f"{key}ir"] = float(mu / sd) if sd > 0 else np.nan
-        summary[f"{key}ir_annual_naive"] = float(mu / sd * np.sqrt(252)) if sd > 0 else np.nan
         summary[f"{key}_positive_rate"] = float((daily[key].dropna() > 0).mean())
-        summary[f"{key}_hac_t"] = hac_tstat(daily[key], lags=horizon)
     history = daily.rankic if rankic_history is None else pd.concat([rankic_history, daily.rankic]).sort_index()
     history = history[~history.index.duplicated(keep="last")]
     cv = direction_cv(history).reindex(daily.index)
