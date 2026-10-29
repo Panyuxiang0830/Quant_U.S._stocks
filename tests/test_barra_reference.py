@@ -182,7 +182,7 @@ def test_report_preserves_reference_panels_and_adds_performance_drawdown_and_cos
     html=path.read_text();payload=json.loads(re.search(r'const D = (.*?);\n',html).group(1))
     assert 'chart-performance' in html and 'chart-drawdown' in html and 'chart-pick-expo' in html
     assert 'chart-heat' in html and 'chart-industry' in html and 'chart-style-unit' in html
-    assert '申万' not in html and '0.999' not in html and '<script src=' not in html
+    assert '申万' not in html and 'mk-corr' not in html and '<script src=' not in html
     nav=(1+res['daily_returns'].portfolio).cumprod();dd=nav/nav.cummax().clip(lower=1)-1
     assert payload['performance']['max_drawdown']==pytest.approx(dd.min())
     assert np.allclose(payload['performance']['portfolio'],nav-1,atol=5e-7)
