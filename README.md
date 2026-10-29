@@ -1,8 +1,62 @@
-# Quant_U.S._stocks
+# 美股量化研究系统
 
-美股因子挖掘（暴搜 / 遗传规划）、本地 WorldQuant BRAIN 式因子评估、XGBoost 选股、回测与 Barra 归因。
+日频数据接口 → 十日市值行业中性标签 → 爆搜 → 三层因子评估 → 半年重训 XGBoost → 50 组回测 → 风格风险及收益归因。
 
-当前状态：**计划阶段**，见 [docs/PLAN.md](docs/PLAN.md)。
+组员搭建与分工请阅读 [详细说明书](docs/HANDBOOK.md)。数据由数据组寻找和整理，本仓库不附带真实行情、财报或策略收益结果。
 
-- 代码（服务器）：`/home/research_pyx/Quant_US_stocks/`
-- 数据（服务器）：`/hy-tmp/data_pyx/us_quant/`
+## 安装和验证
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[test]'
+pytest
+usq demo --output runs/demo --full
+```
+
+`demo --full` 使用人工数据，实际训练六个半年模型，每个固定 500 棵树，明确使用 CPU。生成自包含的回测和 Barra HTML。它不验证真实美股 Alpha，也不替代服务器 CUDA 验收。Mac 若缺 OpenMP，需安装 `libomp`；生产环境建议 Linux。
+
+## 正式运行顺序
+
+先准备 `data/panels/` 与独立交易日历 `calendar.csv`，按说明书统一稳定证券 ID、复权、PIT 基本面和退市处理。路径可在 `configs/default.yaml` 修改。所有命令从仓库根目录执行。
+
+```bash
+usq audit-data
+usq prepare
+usq mine
+usq evaluate --level simple --stage mining
+usq evaluate --level simple --stage validation
+usq evaluate --level complex --stage validation --barra
+usq evaluate --level correlation --stage mining
+usq select
+usq train
+usq backtest --barra
+```
+
+`select` 未通过既定规则时明确中止，不会为凑数量强行保留因子。首次正式运行前应冻结候选预算、阈值、交易成本和数据版本。
+
+## 代码分类
+
+| 目录 | 功能 |
+|---|---|
+| `src/usq/data/` | gpushare 同结构宽表、PIT 展开、多来源比较、数据审计、VWAP 和标签 |
+| `src/usq/evaluation/` | 简单、复杂、因子间三层独立调用 |
+| `src/usq/mining/` | 安全表达式解释器、有限语法爆搜、断点日志、101/191 导入、全部试验 IC 导出 |
+| `src/usq/model/` | 单模型 XGBoost，2015 起扩展训练，2023–2025 每半年重训 |
+| `src/usq/backtest/` | VWAP 区间收益、成本、换手、50 组与指标 |
+| `src/usq/barra/` | 美股研究风格代理、约束 WLS、组合与主动归因、历史风险估计 |
+| `src/usq/research/` | 候选全集的区块 Bootstrap 验证研究工具 |
+| `src/usq/report.py` | 离线净值、回撤、分组、暴露及归因可视化 |
+| `tests/` | 时间对齐、purge、CV、PIT、缺失值、归因恒等式等测试 |
+
+## 口径与实现边界
+
+- CV 按本项目定义：每日 RankIC 为正时，除以前两个日历年历史最小值；为负时除以历史最大值。不含当天；不足两年或零分母返回缺失。不是变异系数。
+- 默认标签为 `VWAP_adj[T+11]/VWAP_adj[T+1]-1`，再做信号日市值行业 WLS 残差和截面标准化。`label.mode: close_sum` 可切到旧式未来十日收盘日收益之和；标签元数据会记录差异。
+- 模型使用截图参数，固定 500 树，不早停、不四折、不 bagging。`missing: null` 转为原生接口的 `np.nan`，零值仍是有效值。
+- 回测是日频目标权重研究模拟。含按成交金额计的成本及多空借券费估算，不包含完整账户、逐笔撮合、容量冲击、资金约束或强制清仓。
+- Barra 部分是自建研究代理模型，不是授权 MSCI USE4 产品。归因使用与组合一致的 VWAP 收益；特异项和成本项独立列示。
+- 101/191 提供完整编号的批量导入、缺失审计和统一评估接口，**未内置全部 292 条标准公式实现**。可将经核对的外部公式输出接入；`--require-complete` 会阻止缺号时声称全库完成。
+- 默认 CUDA；若 GPU 不可用会拒绝静默回退。CPU 运行须在配置中明确指定。
+
+远端参考依据见 [实现核对记录](docs/REFERENCE_AUDIT.md)，验证范围见 [验证记录](docs/VALIDATION.md)。
