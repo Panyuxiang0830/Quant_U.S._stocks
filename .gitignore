@@ -5,9 +5,10 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 .env
-data/
-runs/
-dist/
+/data/
+/runs/
+/dist/
+/build/
 *.pkl
 *.parquet
 *.ubj
