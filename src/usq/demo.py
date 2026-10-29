@@ -37,12 +37,22 @@ def synthetic_panels(root, stocks=60, seed=2964):
               "earnings_ttm": cap * rng.normal(.05, .02, (T, N)),
               "revenue_ttm": cap * np.exp(rng.normal(-.5, .5, (T, N))),
               "total_assets": cap * np.exp(rng.normal(0, .4, (T, N))),
-              "total_liabilities": cap * np.exp(rng.normal(-1, .5, (T, N)))}
+              "total_liabilities": cap * np.exp(rng.normal(-1, .5, (T, N))),
+              "operating_cashflow_ttm": cap * rng.normal(.06,.02,(T,N)),
+              "long_term_debt": cap * rng.uniform(.05,.25,(T,N)),
+              "preferred_equity": np.zeros((T,N))}
     store = PanelStore(root)
     for name, arr in fields.items(): store.save(name, pd.DataFrame(arr, index=dates, columns=ids))
     ind = np.tile(np.array([f"Sector_{i % 3}" for i in range(N)]), (T, 1))
     store.save("industry", pd.DataFrame(ind, index=dates, columns=ids), numeric=False)
     pd.DataFrame({"date": dates}).to_csv(store.root / "calendar.csv", index=False)
+    annual=[]
+    for j,sid in enumerate(ids):
+        for year in range(2010,2026):
+            scale=(1+.015*(j%7))**(year-2010)
+            annual.append({"sid":sid,"fiscal_year":year,"available_date":f"{year+1}0301",
+                           "earnings":(2e7+j*1e6)*scale,"revenue":(1e9+j*1e7)*scale})
+    pd.DataFrame(annual).to_parquet(store.root/"annual_fundamentals.parquet")
     prepare(store)
     return store
 

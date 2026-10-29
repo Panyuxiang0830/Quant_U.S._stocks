@@ -26,6 +26,7 @@ usq prepare
 usq mine
 usq evaluate --level simple --stage mining
 usq evaluate --level simple --stage validation
+usq barra-build
 usq evaluate --level complex --stage validation --barra
 usq evaluate --level correlation --stage mining
 usq select
@@ -44,7 +45,7 @@ usq backtest --barra
 | `src/usq/mining/` | 原版递归生成器与算子、多进程批次、量纲/跨层过滤、已有因子扩展、断点日志及 IC 导出 |
 | `src/usq/model/` | 单模型 XGBoost，2015 起扩展训练，2023–2025 每半年重训 |
 | `src/usq/backtest/` | VWAP 区间收益、成本、换手、50 组与指标 |
-| `src/usq/barra/` | 美股研究风格代理、约束 WLS、组合与主动归因、历史风险估计 |
+| `src/usq/barra/` | 参考描述子/合成/正交化核心、美股适配、固定模型库、持仓归因与原报告扩展 |
 | `src/usq/research/` | 候选全集的区块 Bootstrap 验证研究工具 |
 | `src/usq/report.py` | 离线净值、回撤、分组、暴露及归因可视化 |
 | `tests/` | 时间对齐、purge、CV、PIT、缺失值、归因恒等式等测试 |
@@ -61,7 +62,7 @@ usq backtest --barra
 - 默认标签为 `VWAP_adj[T+11]/VWAP_adj[T+1]-1`，再做信号日市值行业 WLS 残差和截面标准化。`label.mode: close_sum` 可切到旧式未来十日收盘日收益之和；标签元数据会记录差异。
 - 模型使用截图参数，固定 500 树，不早停、不四折、不 bagging。`missing: null` 转为原生接口的 `np.nan`，零值仍是有效值。
 - 回测是日频目标权重研究模拟。含按成交金额计的成本及多空借券费估算，不包含完整账户、逐笔撮合、容量冲击、资金约束或强制清仓。
-- Barra 部分是自建研究代理模型，不是授权 MSCI USE4 产品。归因使用与组合一致的 VWAP 收益；特异项和成本项独立列示。
+- Barra 沿用参考实现的描述子、标准化、合成、正交化、WLS 和收益归因核心，提供美股财务与 VWAP 适配；先固化模型库，再输入持仓。原报告增加收益、回撤和成本。不是授权 MSCI USE4 产品；迁移边界见 [BARRA_PORT.md](docs/BARRA_PORT.md)。
 - 101/191 提供完整编号的批量导入、缺失审计和统一评估接口，**未内置全部 292 条标准公式实现**。可将经核对的外部公式输出接入；`--require-complete` 会阻止缺号时声称全库完成。
 - 默认 CUDA；若 GPU 不可用会拒绝静默回退。CPU 运行须在配置中明确指定。
 - 爆搜默认使用 `FactorExpressionGenerator` 与配套 `Operators`，可配置复杂度、窗口、量纲类别、已有因子和并行进程。原版高层双表达式配对每层最多抽取 100 对；它不是所有树结构的完全穷举。旧模板仅用于历史日志读取，不再作为默认生成器。

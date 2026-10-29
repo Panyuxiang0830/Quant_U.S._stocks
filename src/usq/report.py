@@ -66,31 +66,12 @@ def save_backtest(result, group_returns, out_dir, title="Strategy backtest"):
 
 
 def save_barra(result, backtest, out_dir, metadata=None):
+    """Reference report inputs plus the project's complete reconciled series."""
+    from usq.barra.reference_report import build_report
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     for key, frame in result.items(): frame.to_csv(out / f"{key}.csv", index_label="date")
-    json_dump(metadata or {}, out / "model_metadata.json")
-    ret = backtest.daily.net_return
-    b = result["benchmark_returns"].iloc[:, 0]
-    nav = pd.DataFrame({"portfolio": (1 + ret).cumprod(), "benchmark": (1 + b).cumprod()})
-    nav["relative"] = nav.portfolio / nav.benchmark
-    dd = nav[["portfolio", "benchmark"]] / nav[["portfolio", "benchmark"]].cummax().clip(lower=1) - 1
-    styles = [c for c in result["active_exposures"] if c != "Market" and not c.startswith("Industry:")]
-    figs = [_lines(nav, "Strategy benchmark and relative NAV"), _lines(dd, "Portfolio and benchmark drawdown", True),
-            _lines(result["portfolio_exposures"][styles], "Portfolio style exposures"),
-            _lines(result["benchmark_exposures"][styles], "Benchmark style exposures"),
-            _lines(result["active_exposures"][styles], "Active style exposures"),
-            _lines(result["active_linked"], "Geometrically linked active return contributions", True),
-            _lines(result["portfolio_linked"], "Geometrically linked portfolio return contributions", True),
-            _lines(result["risk"][["annual_volatility"]].astype(float), "Prior-data-only annual risk proxy", True)]
-    monthly = result["active_exposures"][styles].groupby(result["active_exposures"].index.str[:6]).mean()
-    fig = go.Figure(go.Heatmap(z=monthly.T.to_numpy(), x=monthly.index, y=styles, colorscale="RdBu", zmid=0))
-    fig.update_layout(template="plotly_white", title="Monthly active style exposure", height=440)
-    figs.append(fig)
-    summary = pd.DataFrame({"portfolio_mean": result["portfolio_exposures"].mean(),
-                            "benchmark_mean": result["benchmark_exposures"].mean(),
-                            "active_mean": result["active_exposures"].mean()})
-    write_html(out / "report.html", "US research risk model and return attribution", figs,
-        note="Research proxies, not licensed MSCI Barra USE4. Exposures from signal T explain the identical VWAP T+1 to T+2 "
-             "interval used by the strategy. Costs are a separate negative contribution. Active linked contributions sum to "
-             "cumulative portfolio return minus cumulative benchmark return. Risk covariance uses strictly prior intervals.", tables=[summary])
-    return out / "report.html"
+    aliases = {"portfolio_exposures":"daily_portfolio_exposure", "benchmark_exposures":"daily_benchmark_exposure",
+               "active_exposures":"daily_active_exposure", "factor_returns":"daily_factor_returns"}
+    for key, name in aliases.items(): result[key].to_csv(out/f"{name}.csv", index_label="date")
+    json_dump(metadata or {}, out/"model_metadata.json")
+    return build_report(out,portfolio="策略",benchmark="基准" if (metadata or {}).get("has_benchmark",True) else None)

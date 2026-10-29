@@ -5,41 +5,18 @@ import pandas as pd
 
 
 def cross_section(styles, industry, cap, returns, estu, min_obs=30):
-    """Joint constrained WLS: Market + full industries + style exposures.
-
-    Industry cap-weighted returns sum to zero. Objective weights=sqrt(cap), so
-    OLS rows are multiplied by cap**.25 to implement those objective weights.
-    """
-    complete = styles.notna().all(axis=1) & industry.notna() & cap.gt(0)
-    fit = complete & returns.notna() & np.isfinite(returns) & estu.eq(1)
-    if fit.sum() < min_obs:
-        raise ValueError("insufficient risk-regression observations")
-    industries = sorted(industry[fit].astype(str).unique())
-    dummies = pd.get_dummies(industry.astype("string"), dtype=float).reindex(columns=industries, fill_value=0)
-    dummies.columns = [f"Industry:{c}" for c in industries]
-    X = pd.concat([pd.Series(1., index=styles.index, name="Market"), dummies, styles], axis=1)
-    capfit = cap[fit].to_numpy(float)
-    share = cap[fit].groupby(industry[fit].astype(str)).sum().reindex(industries)
-    share = (share / share.sum()).to_numpy()
-    p, k = len(industries), X.shape[1]
-    # Delete last industry free parameter, reintroduce via zero-sum constraint.
-    C = np.delete(np.eye(k), p, axis=1)
-    C[p, 1:p] = -share[:-1] / share[-1]
-    xf, y = X.loc[fit].to_numpy(float), returns[fit].to_numpy(float)
-    sw = (capfit / np.median(capfit)) ** .25
-    reduced = (xf @ C) * sw[:, None]
-    if fit.sum() <= reduced.shape[1] + 2 or np.linalg.matrix_rank(reduced) < reduced.shape[1]:
-        raise ValueError("underdetermined/collinear risk regression")
-    coef = C @ np.linalg.lstsq(reduced, y * sw, rcond=None)[0]
-    f = pd.Series(coef, index=X.columns)
-    residual = returns - X @ f
-    e = residual[fit].to_numpy()
-    w = sw ** 2
-    denom = np.sum(w * (y - np.average(y, weights=w)) ** 2)
-    diagnostics = {"n_obs": int(fit.sum()), "r2": float(1 - np.sum(w * e ** 2) / denom) if denom > 0 else np.nan,
-                   "condition_number": float(np.linalg.cond(reduced)),
-                   "industry_constraint_error": float(np.dot(share, coef[1:p + 1]))}
-    return f, residual, X, complete, diagnostics
+    """Compatibility facade for the original joint WLS estimator."""
+    from .model import fit_cross_section
+    from .core.model import design_matrix
+    exp = styles.assign(industry=industry.map(lambda x: 'Industry:'+str(x) if pd.notna(x) else x), cap=cap, estu=estu.eq(1))
+    cs = fit_cross_section(exp, returns, list(styles), min_obs)
+    inds = [c for c in cs.factor_returns.index if c not in styles and c != 'Market']
+    X = design_matrix(exp, list(styles), inds)
+    fit = estu.eq(1) & styles.notna().all(axis=1) & industry.notna() & cap.gt(0) & returns.notna() & returns.abs().lt(.35)
+    shares = cap[fit].groupby(exp.industry[fit]).sum().reindex(inds); shares /= shares.sum()
+    diag = {'n_obs': cs.n_obs, 'r2': cs.r2,
+            'industry_constraint_error': float(shares @ cs.factor_returns[inds])}
+    return cs.factor_returns, cs.specific_returns, X, industry.notna() & styles.notna().all(axis=1), diag
 
 
 def carino_link(contributions, portfolio, benchmark=None):
@@ -79,91 +56,92 @@ def risk_decomposition(weights, exposure, factor_history, specific_history, min_
             "factor_variance": vf, "specific_variance": vs, "status": "estimated_prior_only"}
 
 
-def analyze(backtest, vwap_adj, universe, exposures, market_cap, benchmark_weights=None, min_obs=30):
-    """Return portfolio/benchmark/active exposures, linked PnL, rolling risk.
+def attribute_weights(weights, model, benchmark_weights=None, costs=None, expected_net=None):
+    """Reference attribution on interval holdings, aligned through cached dates.
 
-    Default benchmark is signal-date market-cap weights on the same universe.
-    Every modeled interval uses the exact portfolio VWAP returns, not close returns.
+    Missing style exposures use the original zero fill; held industry or return
+    gaps raise. Costs are explicit, outside the four explanatory return groups.
     """
-    cal = vwap_adj.index
-    interval = vwap_adj / vwap_adj.shift(1) - 1
-    styles = [k for k in exposures if k != "industry"]
-    industry = exposures["industry"]
-    fr, specific, diagnostics, designs = {}, {}, {}, {}
-    # Fit history before OOS too, so OOS risk uses only earlier observations.
-    first = int(cal.searchsorted(backtest.daily.index[0]))
-    begin = max(2, first - 252)
-    last = int(cal.searchsorted(backtest.daily.index[-1]))
-    for idx in range(begin, last + 1):
-        d, signal_date = cal[idx], cal[idx - 2]
-        style = pd.DataFrame({k: exposures[k].loc[signal_date] for k in styles})
-        try:
-            f, u, X, complete, diag = cross_section(style, industry.loc[signal_date],
-                market_cap.loc[signal_date], interval.loc[d], universe.loc[signal_date], min_obs)
-        except ValueError as e:
-            diagnostics[d] = {"error": str(e)}
-            if d in backtest.daily.index:
-                raise ValueError(f"Barra {d}: {e}") from e
-            continue
-        fr[d], specific[d], diagnostics[d] = f, u, diag
-        # Retain designs for report dates only, avoiding a full T*N*K cube.
-        if d in backtest.daily.index:
-            designs[d] = (X, complete, signal_date)
-    factor_returns = pd.DataFrame(fr).T.fillna(0).sort_index()
-    spec = pd.DataFrame(specific).T.sort_index()
-    pc, bc, pe, be, risk, br = {}, {}, {}, {}, {}, {}
-    for d in backtest.daily.index:
-        if d not in designs:
-            raise ValueError(f"risk model unavailable on portfolio date {d}")
-        X, complete, sig = designs[d]
-        f = factor_returns.loc[d].reindex(X.columns)
-        w = backtest.weights.loc[d]
-        if ((w != 0) & ~complete).any():
-            raise ValueError(f"missing held stock risk exposure at {d}")
-        if benchmark_weights is None:
-            bw = market_cap.loc[sig].where(universe.loc[sig].eq(1) & complete, 0).fillna(0)
-            bw = bw / bw.sum()
-        else:
-            # Supplied rows are already interval holdings, indexed by exit dates.
-            bw = benchmark_weights.loc[d].reindex(w.index).fillna(0)
-            if ((bw != 0) & ~complete).any():
-                raise ValueError(f"missing benchmark exposure at {d}")
-        r = interval.loc[d]
-        if (bw.ne(0) & r.isna()).any():
-            raise ValueError(f"missing benchmark held return {d}")
-        x = X.fillna(0)
-        pe[d], be[d] = x.T @ w, x.T @ bw
-        p, b = pe[d] * f, be[d] * f
-        gross_p, gross_b = float((w * r.fillna(0)).sum()), float((bw * r.fillna(0)).sum())
-        p["Specific"] = gross_p - p.sum()
-        b["Specific"] = gross_b - b.sum()
-        p["Costs"] = -float(backtest.daily.loc[d, "cost"] + backtest.daily.loc[d, "borrow_cost"])
-        b["Costs"] = 0.
-        pc[d], bc[d], br[d] = p, b, gross_b
-        # At entry d-1, only returns with exit strictly before d-1 are known.
-        prior_end = cal[cal.get_loc(d) - 1]
-        fh = factor_returns.loc[factor_returns.index < prior_end].tail(252)
-        sh = spec.loc[spec.index < prior_end].tail(252)
-        risk[d] = risk_decomposition(w, x, fh, sh)
-    port_c = pd.DataFrame(pc).T.fillna(0)
-    bench_c = pd.DataFrame(bc).T.reindex(columns=port_c.columns).fillna(0)
-    benchmark = pd.Series(br).reindex(backtest.daily.index)
-    port_ret = backtest.daily.net_return
-    if not np.allclose(port_c.sum(axis=1), port_ret, atol=1e-10):
-        raise AssertionError("portfolio attribution does not reconcile")
-    if not np.allclose(bench_c.sum(axis=1), benchmark, atol=1e-10):
-        raise AssertionError("benchmark attribution does not reconcile")
-    linked = carino_link(port_c - bench_c, port_ret, benchmark)
-    expected = (1 + port_ret).cumprod() - (1 + benchmark).cumprod()
-    if not np.allclose(linked.sum(axis=1), expected, atol=1e-8):
-        raise AssertionError("geometric attribution does not reconcile")
-    return {"factor_returns": factor_returns, "specific_returns": spec,
-            "portfolio_exposures": pd.DataFrame(pe).T.fillna(0),
-            "benchmark_exposures": pd.DataFrame(be).T.fillna(0),
-            "active_exposures": pd.DataFrame(pe).T.fillna(0) - pd.DataFrame(be).T.fillna(0),
-            "portfolio_contributions": port_c, "benchmark_contributions": bench_c,
-            "active_contributions": port_c - bench_c, "active_linked": linked,
-            "portfolio_linked": carino_link(port_c, port_ret),
-            "risk": pd.DataFrame(risk).T,
-            "regression_diagnostics": pd.DataFrame(diagnostics).T,
-            "benchmark_returns": benchmark.to_frame("benchmark_return")}
+    from .core.attribution import attribute, carino_link as final_link, group
+    if weights.empty or weights.index.has_duplicates or weights.columns.has_duplicates:
+        raise ValueError('empty/duplicate holdings axes')
+    dates = weights.index
+    if not dates.isin(model.factor_returns.index).all(): raise ValueError('model does not cover every holdings date')
+    if not np.isfinite(weights.to_numpy(float)).all(): raise ValueError('holdings must be finite; zero rows represent cash')
+    unknown = weights.columns.difference(model.returns.columns)
+    if len(unknown) and weights[unknown].ne(0).any().any(): raise ValueError('unknown held securities')
+    w = weights.reindex(columns=model.returns.columns, fill_value=0.)
+    if benchmark_weights is None:
+        b = pd.DataFrame(0., index=dates, columns=w.columns)
+    else:
+        if not dates.isin(benchmark_weights.index).all(): raise ValueError('missing benchmark holdings dates')
+        if not np.isfinite(benchmark_weights.to_numpy(float)).all(): raise ValueError('benchmark weights must be finite')
+        extra = benchmark_weights.columns.difference(w.columns)
+        if len(extra) and benchmark_weights[extra].ne(0).any().any(): raise ValueError('unknown benchmark securities')
+        b = benchmark_weights.reindex(index=dates, columns=w.columns, fill_value=0.)
+    coverage = {}
+    shifted = []
+    for d in dates:
+        sig, entry = model.alignment.loc[d, ['signal_date', 'entry_date']]
+        exp = model.exposures.loc[sig].reindex(w.columns)
+        held = w.loc[d].ne(0) | b.loc[d].ne(0)
+        if (held & (model.returns.loc[d].isna() | ~np.isfinite(model.returns.loc[d]))).any():
+            raise ValueError(f'missing held return {d}; resolve corporate-action/delisting marks')
+        if (held & exp.industry.isna()).any(): raise ValueError(f'missing held industry {d}')
+        coverage[d] = {'held_with_zero_filled_style': int((held & exp[model.styles].isna().any(axis=1)).sum()),
+                       'held_stocks': int(held.sum()), 'signal_date': sig, 'entry_date': entry}
+        shifted.append(pd.concat({entry: exp}, names=['trade_date','ts_code']))
+    # Reference attribute() looks up the preceding exposure row. Relabel only
+    # this view to entry dates; its values remain the signal-date exposures.
+    exposures = pd.concat(shifted).sort_index()
+    f = model.factor_returns.reindex(dates)
+    pc, pe = attribute(w, exposures, f, model.returns, model.styles)
+    bc, be = attribute(b, exposures, f, model.returns, model.styles)
+    cost = pd.Series(0.,index=dates) if costs is None else costs.reindex(dates)
+    if cost.isna().any() or (cost < 0).any() or not np.isfinite(cost).all(): raise ValueError('invalid/missing costs')
+    pc['Costs'] = -cost; pc['Total'] -= cost
+    bc['Costs'] = 0.
+    pc = pc.fillna(0.); bc = bc.reindex(columns=pc.columns, fill_value=0.).fillna(0.)
+    rp, rb = pc.Total, bc.Total
+    if expected_net is not None and not np.allclose(rp, expected_net.reindex(dates),atol=1e-10):
+        raise ValueError('holdings/model return basis differs from strategy net return')
+    if (rp <= -1).any() or (rb <= -1).any(): raise ValueError('return <= -100%; geometric attribution undefined')
+    active = pc-bc
+    for c in (pc,bc,active):
+        if not np.allclose(c.drop(columns='Total').sum(axis=1),c.Total,atol=1e-10):
+            raise AssertionError('daily attribution does not reconcile')
+    target = active if benchmark_weights is not None else pc
+    port = rp; bench = rb if benchmark_weights is not None else None
+    linked = final_link(target,port,bench)
+    grouped = group(linked.drop('Costs'),model.styles);grouped['Costs']=linked['Costs']
+    running = carino_link(target.drop(columns='Total'),port,bench)
+    if not np.allclose(running.iloc[-1],linked.reindex(running.columns),atol=1e-9):
+        raise AssertionError('running and reference final Carino disagree')
+    return {'factor_returns': f, 'portfolio_exposures': pe, 'benchmark_exposures': be,
+            'active_exposures': pe-be, 'portfolio_contributions':pc.drop(columns='Total'),
+            'benchmark_contributions':bc.drop(columns='Total'), 'active_contributions':active.drop(columns='Total'),
+            'active_linked':carino_link(active.drop(columns='Total'),rp,rb),
+            'portfolio_linked':carino_link(pc.drop(columns='Total'),rp),
+            'benchmark_returns':rb.to_frame('benchmark_return'),
+            'daily_returns':pd.DataFrame({'portfolio':rp,'benchmark':rb}),
+            'daily_contrib':target, 'summary':pd.DataFrame({'linked_contribution':linked,
+                'mean_exposure':(pe-be if benchmark_weights is not None else pe).mean().reindex(linked.index)}),
+            'groups':grouped.to_frame('linked_contribution'), 'exposure_coverage':pd.DataFrame(coverage).T,
+            'regression_diagnostics':model.diagnostics.reindex(dates)}
+
+
+def cap_benchmark(model, dates):
+    rows = {}
+    for d in dates:
+        exp = model.exposures.loc[model.alignment.loc[d,'signal_date']]
+        w = exp.cap.where(exp.estu.eq(True) & exp.cap.gt(0),0).fillna(0.)
+        if w.sum() <= 0: raise ValueError(f'empty market-cap benchmark {d}')
+        rows[d] = w / w.sum()
+    return pd.DataFrame(rows).T.fillna(0.)
+
+
+def analyze(backtest, vwap_adj=None, universe=None, *, model, benchmark_weights=None):
+    """Use one persisted model for any factor/score portfolio; never refit here."""
+    bw = cap_benchmark(model,backtest.weights.index) if benchmark_weights is None else benchmark_weights
+    return attribute_weights(backtest.weights,model,bw,
+        costs=backtest.daily.cost+backtest.daily.borrow_cost,expected_net=backtest.daily.net_return)

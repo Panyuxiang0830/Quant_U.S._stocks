@@ -20,7 +20,12 @@ def main(argv=None):
     sub.add_parser("select")
     sub.add_parser("train")
     b = sub.add_parser("backtest"); b.add_argument("--scores"); b.add_argument("--barra", action="store_true")
-    sub.add_parser("barra")
+    bb = sub.add_parser("barra-build"); bb.add_argument("--force", action="store_true")
+    ba = sub.add_parser("barra"); ba.add_argument("--holdings"); ba.add_argument("--output")
+    ba.add_argument("--weight-timing", choices=["signal_close","interval"],default="signal_close")
+    ba.add_argument("--benchmark-weights"); ba.add_argument("--no-benchmark",action="store_true")
+    ba.add_argument("--benchmark-timing",choices=["signal_close","interval"],default="signal_close")
+    ba.add_argument("--start");ba.add_argument("--end")
     d = sub.add_parser("demo"); d.add_argument("--output", default="runs/demo"); d.add_argument("--stocks", type=int, default=60)
     d.add_argument("--full", action="store_true", help="also train all six CPU models, 500 trees each")
     imp = sub.add_parser("import-library"); imp.add_argument("--source", required=True); imp.add_argument("--family", choices=["wq101", "gtja191"], required=True)
@@ -60,8 +65,14 @@ def main(argv=None):
     elif a.command == "train":
         from usq.model import train_walkforward
         _, result = train_walkforward(store, cfg["factor_dir"], Path(cfg["run_dir"]) / "selected.json", Path(cfg["run_dir"]) / "model", cfg["model"])
-    elif a.command in ("backtest", "barra"):
-        result = workflow.backtest(cfg, getattr(a, "scores", None), with_barra=a.command == "barra" or a.barra)
+    elif a.command == "backtest":
+        result = workflow.backtest(cfg, a.scores, with_barra=a.barra)
+    elif a.command == "barra-build":
+        result = workflow.barra_model(cfg, force=a.force).meta
+    elif a.command == "barra":
+        if a.no_benchmark and a.benchmark_weights: p.error("--no-benchmark conflicts with --benchmark-weights")
+        result = workflow.barra(cfg,a.holdings,a.weight_timing,a.benchmark_weights,a.benchmark_timing,
+                                a.no_benchmark,a.output,a.start,a.end)
     elif a.command == "import-library":
         from usq.mining.libraries import import_library
         result = import_library(a.source, cfg["factor_dir"], a.family, store.load("label_10"), a.require_complete)

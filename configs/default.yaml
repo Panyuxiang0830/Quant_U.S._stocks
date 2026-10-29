@@ -64,3 +64,10 @@ backtest:
   cost_bps: 5.0
   borrow_bps_annual: 300.0
   groups: 50
+
+barra:
+  model_dir: runs/barra_model
+  start: '20220101'
+  end: '20251231'
+  min_obs: 30
+  descriptor_dir: null

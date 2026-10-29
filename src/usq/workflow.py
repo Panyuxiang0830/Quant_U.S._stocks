@@ -6,7 +6,7 @@ import pandas as pd
 from usq.data import PanelStore
 from usq.evaluation import evaluate_simple, evaluate_complex, evaluate_correlation
 from usq.backtest.engine import run_backtest, group_backtests
-from usq.barra import build_exposures, analyze
+from usq.barra import build_model, analyze, attribute_positions
 from usq.report import save_backtest, save_barra
 from usq.utils import json_dump, sha256
 
@@ -70,8 +70,9 @@ def evaluate(cfg, level, stage="mining", with_barra=False):
     vwap = store.load("vwap_adj", label)
     ctx, barra_meta = None, None
     if with_barra:
-        ex, barra_meta = build_exposures(store)
-        ctx = {"exposures": ex, "market_cap": store.load("market_cap", label)}
+        model = barra_model(cfg, store)
+        barra_meta = {**model.meta, "has_benchmark": True}
+        ctx = {"model": model}
     summaries = {}
     for item in entries:
         f = fs.load(item["name"], label).where(pd.DataFrame(np.repeat(np.asarray(selected_days)[:, None], label.shape[1], axis=1), index=label.index, columns=label.columns))
@@ -136,7 +137,42 @@ def backtest(cfg, scores_path=None, with_barra=False):
     root = Path(cfg["run_dir"])
     path = save_backtest(bt, groups, root / "backtest", "2023-2025 score backtest")
     if with_barra:
-        exposures, metadata = build_exposures(store)
-        attr = analyze(bt, vwap, mask, exposures, store.load("market_cap", vwap))
-        save_barra(attr, bt, root / "barra", metadata)
+        model = barra_model(cfg, store)
+        attr = analyze(bt, model=model)
+        save_barra(attr, bt, root / "barra", {**model.meta, "has_benchmark": True})
     return path
+
+
+def barra_model(cfg, store=None, force=False):
+    store = store or PanelStore(cfg["data_dir"])
+    opts = cfg.get("barra", {})
+    return build_model(store, opts.get("model_dir", str(Path(cfg["run_dir"])/"barra_model")),
+        start=opts.get("start", "20220101"), end=opts.get("end", "20251231"),
+        min_obs=opts.get("min_obs",30), descriptor_dir=opts.get("descriptor_dir"), force=force)
+
+
+def barra(cfg, holdings=None, timing="signal_close", benchmark_weights=None,
+          benchmark_timing="signal_close", no_benchmark=False, output=None, start=None, end=None):
+    model = barra_model(cfg)
+    root=Path(cfg["run_dir"])
+    if holdings is None:
+        from usq.backtest.engine import BacktestResult
+        daily=pd.read_csv(root/"backtest/daily.csv",index_col=0,dtype={0:str})
+        daily.index=daily.index.astype(str)
+        weights=pd.read_pickle(root/"backtest/weights.pkl")
+        if start or end:
+            keep=(daily.index >= (start or daily.index[0])) & (daily.index <= (end or daily.index[-1]))
+            daily=daily.loc[keep];weights=weights.reindex(daily.index)
+        bt=BacktestResult(daily,weights,{})
+        if benchmark_weights or no_benchmark:
+            attr=attribute_positions(weights,model,benchmark_weights,timing="interval",benchmark_timing=benchmark_timing,
+                benchmark=None if no_benchmark else "cap_weighted",costs=daily.cost+daily.borrow_cost)
+            if not np.allclose(attr["daily_returns"].portfolio,daily.net_return,atol=1e-10): raise ValueError("strategy net returns differ")
+        else: attr=analyze(bt,model=model)
+        basis="回测净收益：已含交易与借券成本"
+    else:
+        bt=None
+        attr=attribute_positions(holdings,model,benchmark_weights,timing,benchmark_timing,start,end,
+            benchmark=None if no_benchmark else "cap_weighted")
+        basis="持仓毛收益：未提供外部成本账本"
+    return save_barra(attr,bt,output or root/"barra",{**model.meta,"has_benchmark":not no_benchmark,"portfolio_return_basis":basis})

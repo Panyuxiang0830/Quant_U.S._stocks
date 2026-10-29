@@ -9,7 +9,7 @@ def evaluate_complex(factor, vwap_adj, universe, direction, groups=10,
                      cost_bps=5, barra_context=None, **kwargs):
     """Layer 2. Fixed IS direction; executable one-day portfolios, not label PnL.
 
-    Optional barra_context contains exposures and market_cap; when absent the
+    Optional barra_context contains a persisted model; when absent the
     result explicitly marks Barra as unavailable. CLI --barra computes it.
     """
     if direction not in (-1, 1):
@@ -27,5 +27,5 @@ def evaluate_complex(factor, vwap_adj, universe, direction, groups=10,
     if barra_context is not None:
         from usq.barra import analyze
         attribution = analyze(bt, vwap_adj, universe, **barra_context)
-        summary["barra_status"] = "computed_research_proxy"
+        summary["barra_status"] = "computed_reference_model"
     return summary, bt, group_returns, attribution

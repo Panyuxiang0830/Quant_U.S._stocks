@@ -1,6 +1,6 @@
 # 美股量化系统搭建说明书
 
-版本 1.2　2026 年 10 月 29 日
+版本 1.3　2026 年 10 月 29 日
 
 面向数据组、因子挖掘负责人及验证课题研究组。
 
@@ -253,7 +253,7 @@ T 日信号对应 T+1 到 T+2 VWAP 区间。输出成本前后累计收益、年
 
 本地 Fitness 定义为 Sharpe × sqrt(abs(年化收益) / max(日均单边换手, 0.125))，输出名称为 fitness_local。Sharpe、收益和换手依本项目模拟口径计算；它是受 WorldQuant 风格启发的综合指标，没有与 BRAIN 私有平台逐项校准，不能当作官方提交分数。
 
-复杂评估可加 `--barra`，为候选输出风格代理模型暴露和收益贡献。缺失风格数据会明确报出或标明未计算；不把空结果写成零暴露。实际选择可结合 RankIC、分层、成本后 Sharpe、回撤及暴露，避免仅凭单一高分决定。
+复杂评估可加 `--barra`，为候选输出风格代理模型暴露和收益贡献。整体缺失的风格会列明；单只持仓缺失风格沿用原实现填 0，并报告覆盖数量，不能把零填充当成数据完整。实际选择可结合 RankIC、分层、成本后 Sharpe、回撤及暴露，避免仅凭单一高分决定。
 
 ```bash
 usq evaluate --level complex --stage validation --barra
@@ -351,66 +351,130 @@ score 另外按每日排名分 50 组，G01 最低、G50 最高，展示平均�
 
 <!-- PAGEBREAK -->
 
-## 5 Barra 研究代理模型的风格暴露
+## 5 Barra 风格暴露的构建
 
-本模块使用美股数据构建透明的风格代理，通过约束横截面 WLS 估计因子收益并进行组合归因。它不是授权 MSCI USE4 产品，也不宣称复刻其全部描述子、风险调整及校准方法。
+本模块沿用参考实现的描述子、预处理、风格合成、横截面 WLS 和收益归因核心，并通过适配层接入美股数据、行业与 VWAP 区间。它是一套透明的 CNE5 风格研究实现的美股适配，不宣称等同于授权 MSCI 美国商业风险模型。
 
-| 风格 | 本版代理定义 |
+| 风格 | 细项与计算口径 |
 |---|---|
-| Size | log(总市值) 的截面标准化 |
-| Beta | 252 日股票收益与市场代理收益滚动协方差 / 市场方差，至少 126 日 |
-| Momentum | log(close_adj[T-21] / close_adj[T-252]) |
-| ResidualVolatility | 股票收益减去滚动 Beta 乘市场收益后的 126 日波动，至少 60 日 |
-| NonLinearSize | 标准化 Size 的三次方，对常数和 Size 回归后的残差 |
-| Liquidity | 21 日平均成交金额 / 市值的对数，至少 15 日 |
-| BookToPrice | PIT 账面权益 / 当日市值 |
-| EarningsYield | PIT TTM 利润 / 当日市值 |
-| Growth | PIT TTM 收入相对 252 日前的变化率 |
-| Leverage | PIT 总负债 / 总资产 |
+| Size | LNCAP = log(总市值) |
+| Beta | BETA：252 日指数加权市场回归，半衰期 63 日，至少 126 日有效观测 |
+| Momentum | RSTR：504 日加权对数超额收益，滞后 21 日、半衰期 126 日，至少 252 日有效观测 |
+| ResidualVolatility | 0.74 DASTD + 0.16 CMRA + 0.10 HSIGMA；再对 Beta、Size 正交 |
+| NonLinearSize | Size³ 对常数与 Size 加权回归取残差，再标准化 |
+| BookToPrice | BTOP = 普通股账面权益 / 总市值 |
+| Liquidity | 0.35 STOM + 0.35 STOQ + 0.30 STOA；再对 Size 正交 |
+| EarningsYield | 0.68 EPFWD + 0.21 CETOP + 0.11 ETOP；无分析师预期时按可用细项重新归一 |
+| Growth | 0.18 EGRLF + 0.11 EGRSF + 0.24 EGRO + 0.47 SGRO；缺失细项按可用权重重新归一 |
+| Leverage | 0.38 MLEV + 0.35 DTOA + 0.27 BLEV |
 
-每个风格在当日股票池内使用中位数和 MAD 去极值，再做截面 zscore。基本面缺少对应输入时，该风格不会伪造，模型元数据将列出缺失的可选风格。当前因子集合、公式、窗口与可用字段一起保存。
+细项先按 median ± 5 × 1.4826 MAD 去极值，以市值加权均值去中心、等权总体标准差缩放（ddof=0）。合成后再处理，正交化使用 sqrt(cap) 目标权重，最后再次标准化。所有统计量仅使用当日估计股票池。
 
-行业使用数据组提供的历史分类。回归同时包含 Market、完整行业哑变量和上述可用风格。所有股票的 Market 暴露为 1，行业因子加市值权重约束以解决共线性；这是解释市场效应与行业相对效应的结构。[MSCI 关于市场与行业约束的说明](https://www.msci.com/documents/10199/ed6e42a3-c1fa-4430-89ba-efd5a5b52558)
+DASTD 使用 252 日收益波动、半衰期 42 日；CMRA 使用最近 12 个 21 交易日月块的累计对数收益极差；HSIGMA 来自加权 Beta 回归残差。STOM、STOQ、STOA 分别使用 1、3、12 个月累计换手率除以月数后取对数。输入 volume/shares_out 为比例，进入原描述子前转为百分数，避免重复乘除 100。
 
-新上市股票和基本面缺失股票可能没有完整暴露。本版不会把持仓缺失暴露悄悄填为零；应在建立股票池时确定上市预热要求，并核对缺失覆盖。回归样本不足或设计矩阵共线时明确中止，保留诊断。
-
-风格代理采用收盘历史构建，但收益归因回归使用与策略相同的 VWAP 区间收益。区分描述子输入价与所解释收益的价格口径，避免策略用 VWAP 而归因却使用另一套收盘收益。
+市场收益代理采用前一日市值加权。无风险年利率默认 0，实际值写入模型元数据。长窗口必须保留预热数据：从 2022 年构建归因模型时，不能只加载 2022 年后的价格；若要求从 2015 年首日就有完整动量，建议价格预热至少回到 2012 年。
 
 <!-- PAGEBREAK -->
 
-## 5 收益归因 风险估计与可视化
+## 5 Barra 财务细项与数据接口
 
-### 逐日收益归因
+财务宽表沿用统一 pickle 格式，并在首个可用交易日才进入面板。金额统一为美元，普通股权益与普通股市值口径要一致。TTM 由数据组按财报类型和财年核对，不能把季度单值直接当 TTM。
 
-对区间 T+1 到 T+2，以 T 日已知暴露解释同一区间的股票 VWAP 调整价收益。WLS 目标权重为 sqrt(市值)，换成普通最小二乘输入时，行乘数为市值的四次方根；不要误乘完整平方根。
+| 细项 | 输入与定义 |
+|---|---|
+| BTOP、ETOP | book_equity / market_cap；earnings_ttm / market_cap |
+| CETOP | operating_cashflow_ttm / market_cap |
+| EGRO、SGRO | 最近五个已知财年利润、营收对财政年度回归的斜率 / 平均绝对值；至少三个财年 |
+| MLEV | (market_cap + preferred_equity + long_term_debt) / market_cap |
+| DTOA | total_liabilities / total_assets |
+| BLEV | (book_equity + preferred_equity + long_term_debt) / book_equity；仅正账面权益 |
+
+新增财务宽表为 operating_cashflow_ttm、long_term_debt、preferred_equity。只有确认公司没有优先股时，preferred_equity 才能填 0；不知道的数值保留缺失，不能通过补零拼成完整杠杆因子。
+
+成长细项输入 `data/panels/annual_fundamentals.parquet`，每行一只股票的一个完整财年：
 
 ```text
-r_i = Market_return + industry_exposure_i × industry_return
-      + style_exposure_i × style_return + specific_return_i
-portfolio_exposure = X' × portfolio_weights
-portfolio_gross_return = sum(factor_exposure × factor_return)
-                         + portfolio_specific_return
-portfolio_net_return = portfolio_gross_return + Costs
+sid | fiscal_year | available_date | earnings | revenue
+A   | 2020        | 20210301       | ...      | ...
 ```
 
-成本项 Costs 为负，包含交易成本及借券估计。组合、基准、主动权重分别处理；主动暴露等于组合暴露减基准暴露。默认基准是同池可解释股票的信号日市值加权组合，应核对其证券覆盖是否与策略一致。
+fiscal_year 是发行人的财政年度，不要求财年在 12 月结束；earnings、revenue 为该完整财年的美元值。available_date 为经公告时刻与交易日历转换后、首次能用于收盘信号的交易日。按该日期逐步展开已知年报，每个 sid/fiscal_year 只采用首次披露版本；未来披露的年报或后续修订不回填此前日期。
 
-每日因子贡献、特异贡献和成本之和必须与组合净收益逐日对上。多期使用 Carino 链接，主动累计贡献之和对上“组合累计收益减基准累计收益”；这与组合净值除基准净值的相对收益是不同量，图表名称要分清。
+可选的一致预期细项 EPFWD、EGRLF、EGRSF 可在独立目录按同轴宽表提供，并用 barra.descriptor_dir 指定。文件名为对应细项名，如 EPFWD.pkl；同一细项不能同时来自两个入口。数据组需保存时点和来源说明，不用今天的一致预期重建历史。
 
-### 风险估计
+缺少整个风格的全部细项时，不生成该风格，并在 meta.json 中列明 missing_styles；缺少部分细项时沿用原合成器按股票重新归一。应先查看 available_descriptors、missing_descriptors、missing_styles，再描述本次实际使用了多少个风格。
 
-使用入场时已经观察到的历史因子收益协方差和特异方差估计组合风险，默认最多回看 252 日、至少 60 日。组合日方差近似为 b'Fb + sum(w_i² × specific_variance_i)，再年化。特异协方差暂按对角近似，未实现官方模型的波动状态、特异风险收缩或优化偏差调整。
+<!-- PAGEBREAK -->
 
-### 可视化清单
+## 5 固定模型库与持仓归因
 
-必须展示策略、基准与相对净值；策略与基准回撤；组合、基准、主动风格暴露的时序；按月主动暴露热图；组合和主动累计收益贡献；预测风险曲线及回归覆盖诊断。因子单位收益、组合暴露和实际贡献不能混为一张含义不清的图。
+模型构建与策略归因分开。先建立一次股票暴露和因子收益模型库，再让不同单因子或模型 score 的持仓复用它，不因更换策略而重估整套风险因子。
 
 ```bash
-usq backtest --barra
-# 仅需重新构建该分析时，也可运行 usq barra
+usq barra-build
+usq backtest
+usq barra
+# 独立持仓文件也可复用模型库
+usq barra --holdings work/positions.parquet
 ```
 
-HTML 自包含，可离线打开。相应 CSV 保存于 `runs/barra/`，包括 factor_returns、specific_returns、exposures、contributions、linked、risk 和 regression_diagnostics。收益和回撤图直接使用回测的组合净收益序列，保证展示与计算同源。
+默认模型库为 runs/barra_model，区间为 2022–2025，覆盖因子验证和策略回测。可在配置的 barra 节调整 model_dir、start、end、min_obs、descriptor_dir。`backtest --barra` 和复杂评估的 `--barra` 会在首次缺少库时构建，之后复用；已有库与当前数据或计算代码不一致时明确报错，换目录或显式运行 barra-build --force 重建。
+
+```text
+runs/barra_model/
+  exposures.parquet        # 真实信号日 × 证券的风格、行业、市值、估计池
+  factor_returns.parquet  # 逐日市场、行业、风格收益
+  specific_returns.parquet
+  asset_returns.parquet   # 与策略相同的 VWAP 区间收益
+  alignment.parquet       # 区间结束日 -> 信号日、入场日
+  diagnostics.parquet
+  meta.json               # 实际细项、参数、数据与源码及文件哈希
+```
+
+每天联合回归 Market、完整行业哑变量和可用风格，WLS 目标权重为 sqrt(cap)，OLS 行乘数为 cap**0.25；行业因子收益满足行业市值占比加权和为 0。沿用原估计池规则，绝对单日收益不低于 35% 的股票不进入估计，但持仓贡献仍计算其实际收益与特异部分。样本不足或矩阵秩不足会记录失败，不能把对应日期当成已成功归因。
+
+独立持仓可为长表 trade_date、sid、weight，或日期 × 证券宽表。默认 trade_date 是信号日 T 收盘后的目标权重，在 T+1 VWAP 建仓，赚取至 T+2 的收益；两次快照间按收益和含现金的组合净值漂移，支持部分仓位与多空。若输入已经是回测产出的区间起始权重、索引为区间结束日，须用 --weight-timing interval，避免再移位。
+
+默认基准为同池信号日市值加权组合。指定指数归因时，提供其历史成分权重，通过 --benchmark-weights 与 --benchmark-timing 指定口径；不能拿一条指数收盘收益曲线冒充成分归因。绝对收益归因使用 --no-benchmark。独立持仓未提供交易账本时报告毛收益；读取本系统回测产物时使用含交易、借券成本的净收益。
+
+<!-- PAGEBREAK -->
+
+## 5 收益、回撤与归因报告
+
+信号日 T 已知的暴露解释 VWAP T+1 到 T+2 收益。模型库保存真实信号日期，适配层只在调用原归因函数时构建入场日期视图，不使用 T+1 收盘后才知道的暴露。
+
+```text
+portfolio_exposure = X.T @ portfolio_weights
+factor_contribution = portfolio_exposure * factor_return
+specific_contribution = sum(weight * (asset_return - X @ factor_return))
+net_return = sum(factor_contribution) + specific_contribution - costs
+active_weights = portfolio_weights - benchmark_weights
+```
+
+缺失风格的持仓暴露沿用原实现的 0 填充，并输出 exposure_coverage 中的股票数，不能默认为数据完整。持仓行业或区间价格缺失时中止，要求补齐映射、退市或其他终值；不把持仓缺失收益补为 0。
+
+报告保留参考实现的风格暴露、主动暴露月度热图、明细表，以及“暴露 × 因子单位收益 = 贡献”的单因子联动分析；行业独立展示，不与风格混成一类。新增策略与基准累计收益、相对净值、策略与基准回撤、策略最大回撤。回撤高水位包括初始净值 1。
+
+逐日贡献分为市场、行业、风格、特异与成本五类，多期通过 Carino 链接。无基准时分项合计等于组合累计收益；有基准时等于组合累计收益减去基准累计收益。这个收益差不同于相对净值减 1，报告分别标明，避免混用。
+
+```text
+runs/barra/
+  report.html
+  daily_returns.csv
+  daily_contrib.csv
+  daily_portfolio_exposure.csv
+  daily_benchmark_exposure.csv
+  daily_active_exposure.csv
+  daily_factor_returns.csv
+  summary.csv
+  groups.csv
+  exposure_coverage.csv
+  model_metadata.json
+```
+
+同时保存完整 portfolio_contributions、active_contributions、portfolio_linked、active_linked 等文件以便复核。HTML 内嵌数据与 SVG 渲染，不依赖 CDN；更换持仓后可直接重新生成归因报告，不需要重新训练 XGBoost。
+
+本模块交付的是风格暴露和收益归因流程。因子协方差、特异风险模型与跟踪误差归因可作为后续研究扩展，不把简单历史方差公式当作原项目已实现的风险模型。
 
 <!-- PAGEBREAK -->
 
