@@ -56,6 +56,7 @@ def demo(output="runs/demo", stocks=60, full=False):
            "backtest": {"top_n": 10, "groups": 50, "cost_bps": 5., "borrow_bps_annual": 300.}}
     (out / "demo_config.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
     entries = search(store, out / "mining", fields=("close", "volume", "returns", "vwap"), windows=(5, 20),
+                     complexity=2, max_workers=1, batch_size=8,
                      max_trials=16, top_k=4, min_abs_rankic=0, min_coverage=.3)
     evaluate(cfg, "simple", "mining")
     evaluate(cfg, "simple", "validation")

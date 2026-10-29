@@ -1,4 +1,4 @@
-from .expressions import compute, enumerate_expressions
+from .recursive import compute, generate_candidates
 from .search import search
 
-__all__ = ["compute", "enumerate_expressions", "search"]
+__all__ = ["compute", "generate_candidates", "search"]

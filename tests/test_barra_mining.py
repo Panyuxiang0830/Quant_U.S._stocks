@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from usq.barra.attribution import cross_section, carino_link, risk_decomposition
-from usq.mining.expressions import compute, enumerate_expressions
+from usq.mining.legacy_templates import compute, enumerate_expressions
 from usq.research import validation_experiment
 
 
@@ -40,7 +40,7 @@ def test_risk_variance_formula():
     assert result["specific_variance"] == pytest.approx((w ** 2 * u.var()).sum())
 
 
-def test_expression_no_future_dependence_and_unsafe_calls_rejected():
+def test_legacy_ledger_expression_no_future_dependence_and_unsafe_calls_rejected():
     rng = np.random.default_rng(3)
     x = pd.DataFrame(rng.normal(10, 1, (40, 10)))
     exp = "rank(ts_delta(close,5)/ts_std(close,10))"

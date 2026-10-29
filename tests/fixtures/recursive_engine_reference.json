@@ -1,0 +1,249 @@
+{
+  "source_sha256": {
+    "operators.py": "6f145ff2412468368aa2ed48ba85029b64962fad062bf8b7434d24ab549b31d5",
+    "expression_generator.py": "95713e4cc580a21f31393a2c6442d2fd7ac709192966b1e23f51076f8d04d131"
+  },
+  "profiles": [
+    {
+      "complexity": 1,
+      "params": {
+        "stats_windows": [
+          5,
+          10
+        ],
+        "time_periods": [
+          1,
+          5
+        ],
+        "binary_random_seed": 2964
+      },
+      "fields": [
+        "close",
+        "volume",
+        "returns"
+      ],
+      "dimensions": {
+        "volume": "volume",
+        "returns": "percentage"
+      },
+      "dimension_filter": [
+        "unitless",
+        "percentage"
+      ],
+      "max_count": 128,
+      "generated_count": 104,
+      "selected_count": 61,
+      "selected_sha256": "b7e7e9145bd9f20ef950e1ab03ea32789359066648826817a2ac62895b85ef6f",
+      "first_five": [
+        [
+          "returns",
+          {
+            "expression": "returns",
+            "dimension": "percentage"
+          }
+        ],
+        [
+          "close_rank",
+          {
+            "expression": [
+              "rank",
+              "close"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "close_zscore",
+          {
+            "expression": [
+              "zscore",
+              "close"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "volume_rank",
+          {
+            "expression": [
+              "rank",
+              "volume"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "volume_zscore",
+          {
+            "expression": [
+              "zscore",
+              "volume"
+            ],
+            "dimension": "unitless"
+          }
+        ]
+      ]
+    },
+    {
+      "complexity": 2,
+      "params": {
+        "stats_windows": [
+          5,
+          10
+        ],
+        "time_periods": [
+          1,
+          5
+        ],
+        "binary_random_seed": 2964
+      },
+      "fields": [
+        "close",
+        "volume",
+        "returns"
+      ],
+      "dimensions": {
+        "volume": "volume",
+        "returns": "percentage"
+      },
+      "dimension_filter": [
+        "unitless",
+        "percentage"
+      ],
+      "max_count": 128,
+      "generated_count": 232,
+      "selected_count": 128,
+      "selected_sha256": "03e550cf5ab4db35619ea73834f1d62b4629cab97976f36302c846d45a722a56",
+      "first_five": [
+        [
+          "returns",
+          {
+            "expression": "returns",
+            "dimension": "percentage"
+          }
+        ],
+        [
+          "close_rank",
+          {
+            "expression": [
+              "rank",
+              "close"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "close_zscore",
+          {
+            "expression": [
+              "zscore",
+              "close"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "volume_rank",
+          {
+            "expression": [
+              "rank",
+              "volume"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "volume_zscore",
+          {
+            "expression": [
+              "zscore",
+              "volume"
+            ],
+            "dimension": "unitless"
+          }
+        ]
+      ]
+    },
+    {
+      "complexity": 3,
+      "params": {
+        "stats_windows": [
+          5,
+          10
+        ],
+        "time_periods": [
+          1,
+          5
+        ],
+        "binary_random_seed": 2964
+      },
+      "fields": [
+        "close",
+        "volume",
+        "returns"
+      ],
+      "dimensions": {
+        "volume": "volume",
+        "returns": "percentage"
+      },
+      "dimension_filter": [
+        "unitless",
+        "percentage"
+      ],
+      "max_count": 128,
+      "generated_count": 2580,
+      "selected_count": 128,
+      "selected_sha256": "03e550cf5ab4db35619ea73834f1d62b4629cab97976f36302c846d45a722a56",
+      "first_five": [
+        [
+          "returns",
+          {
+            "expression": "returns",
+            "dimension": "percentage"
+          }
+        ],
+        [
+          "close_rank",
+          {
+            "expression": [
+              "rank",
+              "close"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "close_zscore",
+          {
+            "expression": [
+              "zscore",
+              "close"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "volume_rank",
+          {
+            "expression": [
+              "rank",
+              "volume"
+            ],
+            "dimension": "unitless"
+          }
+        ],
+        [
+          "volume_zscore",
+          {
+            "expression": [
+              "zscore",
+              "volume"
+            ],
+            "dimension": "unitless"
+          }
+        ]
+      ]
+    }
+  ],
+  "generator_logic_ast_sha256": "f0a7b1f703af8323666521873bf4b33631509c1585ed6cd5565c9cd594666d61"
+}

@@ -41,7 +41,7 @@ usq backtest --barra
 |---|---|
 | `src/usq/data/` | 字段宽表、PIT 展开、多来源比较、数据审计、VWAP 和标签 |
 | `src/usq/evaluation/` | 简单、复杂、因子间三层独立调用 |
-| `src/usq/mining/` | 安全表达式解释器、有限语法爆搜、断点日志、101/191 导入、全部试验 IC 导出 |
+| `src/usq/mining/` | 原版递归生成器与算子、多进程批次、量纲/跨层过滤、已有因子扩展、断点日志及 IC 导出 |
 | `src/usq/model/` | 单模型 XGBoost，2015 起扩展训练，2023–2025 每半年重训 |
 | `src/usq/backtest/` | VWAP 区间收益、成本、换手、50 组与指标 |
 | `src/usq/barra/` | 美股研究风格代理、约束 WLS、组合与主动归因、历史风险估计 |
@@ -64,5 +64,6 @@ usq backtest --barra
 - Barra 部分是自建研究代理模型，不是授权 MSCI USE4 产品。归因使用与组合一致的 VWAP 收益；特异项和成本项独立列示。
 - 101/191 提供完整编号的批量导入、缺失审计和统一评估接口，**未内置全部 292 条标准公式实现**。可将经核对的外部公式输出接入；`--require-complete` 会阻止缺号时声称全库完成。
 - 默认 CUDA；若 GPU 不可用会拒绝静默回退。CPU 运行须在配置中明确指定。
+- 爆搜默认使用 `FactorExpressionGenerator` 与配套 `Operators`，可配置复杂度、窗口、量纲类别、已有因子和并行进程。原版高层双表达式配对每层最多抽取 100 对；它不是所有树结构的完全穷举。旧模板仅用于历史日志读取，不再作为默认生成器。
 
-计算口径见 [实现口径记录](docs/REFERENCE_AUDIT.md)，验证范围见 [验证记录](docs/VALIDATION.md)。
+计算口径见 [实现口径记录](docs/REFERENCE_AUDIT.md)，迁移边界见 [递归引擎核对](docs/ENGINE_PORT.md)，验证范围见 [验证记录](docs/VALIDATION.md)。

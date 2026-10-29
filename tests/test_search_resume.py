@@ -28,4 +28,4 @@ def test_resume_keeps_eligible_factor_even_if_higher_quality_trial_failed_covera
     second = mod.search(store, tmp_path / "mining", **args)
     assert len(first) == len(second) == 1
     assert first[0]["name"] == second[0]["name"]
-    assert len(calls) == 2  # existing trials were not recomputed
+    assert len(calls) == 3  # two trial evaluations plus one retained full-calendar panel

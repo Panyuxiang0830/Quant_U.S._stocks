@@ -3,7 +3,8 @@ import json
 import sqlite3
 from pathlib import Path
 import pandas as pd
-from usq.mining.expressions import compute
+from usq.mining.recursive import ENGINE_VERSION, compute as recursive_compute, load_panels
+from usq.mining.legacy_templates import compute as legacy_compute
 from usq.evaluation import evaluate_simple
 from usq.workflow import stage_days
 
@@ -13,14 +14,23 @@ def export_trial_ic(store, mining_dir, stage, output):
     settings = json.loads((root / "search_config.json").read_text())
     label = store.load("label_10"); mask = store.load("universe", label).eq(1)
     days = stage_days(store, label, stage)
-    panels = {}
-    for name in settings["fields"]:
-        if name == "returns":
-            close = store.load("close_adj", label)
-            panels[name] = close / close.shift(1) - 1
-        else:
-            source = f"{name}_adj" if name in ("open", "high", "low", "close", "vwap") else name
-            panels[name] = store.load(source, label)
+    if settings.get("engine") == ENGINE_VERSION:
+        panels, _ = load_panels(store, label, settings["fields"], settings["seeds"],
+            settings["seed_factor_dir"], settings["seed_factors"], settings["additional_field_dimensions"])
+        compute = recursive_compute
+    elif "engine" not in settings:
+        # Explicitly isolated read compatibility, never a new-search fallback.
+        panels = {}
+        for name in settings["fields"]:
+            if name == "returns":
+                close = store.load("close_adj", label)
+                panels[name] = close / close.shift(1) - 1
+            else:
+                source = f"{name}_adj" if name in ("open", "high", "low", "close", "vwap") else name
+                panels[name] = store.load(source, label)
+        compute = legacy_compute
+    else:
+        raise ValueError("unknown trial engine version")
     db = sqlite3.connect(root / "trials.sqlite")
     result = {}
     for name, expression in db.execute("SELECT name, expression FROM trials WHERE status='ok' ORDER BY name"):

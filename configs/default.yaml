@@ -9,6 +9,18 @@ label:
 mining:
   fields: [open, high, low, close, volume, returns, vwap]
   windows: [5, 10, 20, 60, 120]
+  time_periods: [1, 5, 10]
+  complexity: 3
+  dimension_filter: [unitless, percentage]
+  required_fields: []
+  max_workers: 8
+  batch_size: 64
+  start_method: auto
+  additional_field_dimensions:
+    volume: volume
+    returns: percentage
+  seed_factor_dir: null
+  seed_factors: []
   seeds:
     - rank(close/open-1)
     - rank((close-vwap)/vwap)
